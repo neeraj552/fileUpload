@@ -106,9 +106,9 @@ Solved a real-world dependency conflict between Spring Boot and Swagger causing 
 
 ---
 
-## 📎 GitHub Repository
+## 📩 Email
 
-https://github.com/neeraj552/fileUpload
+neerajkumarsharma345@gmail.com
 
 
 ---
