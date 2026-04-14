@@ -16,6 +16,5 @@ public class FileMetadata {
     private String contentType;
     private String storedName;
     private Long size;
-    private LocalDateTime uploadDate;
     private LocalDateTime uploadedAt;
 }

@@ -2,15 +2,18 @@ package com.neeraj.fileUpload.serviceImpl;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.apache.tika.Tika;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -20,6 +23,7 @@ import com.neeraj.fileUpload.entity.FileMetadata;
 import com.neeraj.fileUpload.exception.FileStorageException;
 import com.neeraj.fileUpload.repository.FileRepository;
 import com.neeraj.fileUpload.service.FileService;
+
 @Service
 public class FileServiceImpl implements FileService {
 
@@ -28,8 +32,12 @@ public class FileServiceImpl implements FileService {
     private final FileStorageProperties properties;
     private final Tika tika = new Tika();
 
-    private static final List<String> ALLOWED_TYPES =
-            List.of("image/png", "image/jpeg", "application/pdf");
+    private static final Map<String, String> ALLOWED_EXTENSIONS = Map.of(
+            "png", "image/png",
+            "jpg", "image/jpeg",
+            "jpeg", "image/jpeg",
+            "pdf", "application/pdf"
+    );
 
     public FileServiceImpl(FileStorageProperties properties,
                            FileRepository fileRepository) {
@@ -45,43 +53,38 @@ public class FileServiceImpl implements FileService {
     @Override
     public FileMetadata upload(MultipartFile file) {
 
-        //  1. Empty check
         if (file.isEmpty()) {
             throw new FileStorageException("File is empty");
         }
 
-        //  2. Size validation
         if (file.getSize() > properties.getMaxSize()) {
             throw new FileStorageException("File size exceeds limit");
         }
 
         String originalName = StringUtils.cleanPath(file.getOriginalFilename());
 
-        //  3. Path traversal protection
         if (originalName.contains("..")) {
             throw new FileStorageException("Invalid file name");
         }
 
         try {
-            //  4. Content validation using Tika (REAL SECURITY)
             String detectedType = tika.detect(file.getInputStream());
+            String extension = getExtension(originalName);
+            String expectedType = ALLOWED_EXTENSIONS.get(extension);
 
-            if (!ALLOWED_TYPES.contains(detectedType)) {
-                throw new FileStorageException("Invalid file type");
+            if (expectedType == null || !expectedType.equals(detectedType)) {
+                throw new FileStorageException("File content does not match extension");
             }
 
-            //  5. UUID naming
             String storedName = UUID.randomUUID() + "_" + originalName;
 
             Path targetLocation = storageLocation.resolve(storedName);
 
-            //  6. STREAMING (not byte[])
             try (InputStream inputStream = file.getInputStream()) {
                 Files.copy(inputStream, targetLocation,
                         StandardCopyOption.REPLACE_EXISTING);
             }
 
-            //  7. Save metadata
             FileMetadata metadata = new FileMetadata();
             metadata.setOriginalName(originalName);
             metadata.setStoredName(storedName);
@@ -93,6 +96,33 @@ public class FileServiceImpl implements FileService {
 
         } catch (IOException ex) {
             throw new FileStorageException("File upload failed", ex);
+        }
+    }
+    private String getExtension(String filename) {
+        int index = filename.lastIndexOf(".");
+        if (index == -1) return "";
+        return filename.substring(index + 1).toLowerCase();
+    }
+
+    @Override
+    public Resource download(Long id) {
+
+        FileMetadata metadata = fileRepository.findById(id)
+                .orElseThrow(() -> new FileStorageException("File not found"));
+
+        Path filePath = storageLocation.resolve(metadata.getStoredName());
+
+        try {
+            Resource resource = new UrlResource(filePath.toUri());
+
+            if (!resource.exists() || !resource.isReadable()) {
+                throw new FileStorageException("File not found on disk");
+            }
+
+            return resource;
+
+        } catch (MalformedURLException ex) {
+            throw new FileStorageException("Error reading file", ex);
         }
     }
 }
